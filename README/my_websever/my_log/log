@@ -1,0 +1,151 @@
+# LOG部分
+
+## 头文件
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002113945313.png" alt="image-20251002113945313" style="zoom:50%;" />
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002113954258.png" alt="image-20251002113954258" style="zoom:50%;" />
+
+`<stdio.h>` 用来做格式化输出（`fprintf`、`snprintf` 等）。
+
+`<stdarg.h>` 用来支持 `write_log(int level, const char* format, ...)` 这种**可变参数日志接口**。
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002164923333.png" alt="image-20251002164923333" style="zoom: 33%;" />
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002165145770.png" alt="image-20251002165145770" style="zoom:33%;" />
+
+## vsnprintf
+
+int m = vsnprintf(m_buf + n, m_log_buf_size - n - 1, format, valst); 
+
+vsnprintf是可变参数中用来打印的函数，与snprintf相似。
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002171933492.png" alt="image-20251002171933492" style="zoom:33%;" />
+
+## 设计模式
+
+​	由于这部分是用来作为日志系统的，整个程序中有一个实例就行。所以设计为单例模式并且这里使用的是懒汉模式。
+
+​	懒汉模式：只有在被调用时才会创建
+
+​	饿汉模式：程序一运行，就会创建实例、
+
+​	单例模式核心就是利用static。创建静态的类对象。并且这个创建是在静态的类成员函数中完成，函数返回指向这个静态类对象的指针。使用静态类成员函数可以使得该函数属于类，而不是对象。任何想访问该实例，不需要再创建对象，通过`类名::静态成员函数` 就可以访问。
+
+​	同时要将构造函数以及析构函数写在private中，防止外部创建实例对象。这里的析构函数使用了虚函数：
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002154418417.png" alt="image-20251002154418417" style="zoom: 33%;" />
+
+## init函数
+
+​	这个函数的主要是用于初始化参数。之所以不在构造函数中初始化。以因为在init函数中，可以控制参数的赋值，方便更改。
+
+### 当前时间的获取：
+
+用于文件名上
+
+​	先引入头文件<time.h>  <sys/time.h>
+
+ struct tm {
+
+  int tm_sec; int tm_min; int tm_hour; int tm_mday; int tm_mon;
+
+int tm_year;int tm_wday;int tm_yday; int tm_isdst;
+
+ };
+
+​	`time(NULL)` 返回当前时间点的 **秒数**（自 UNIX 纪元 1970-01-01 00:00:00 UTC 起的秒数），类型是 `time_t`。
+
+​	localtime()函数会将传入的时间转换为结构体tm形式，并返回指向这个结构提的指针。
+
+```
+ // 获取当前时间点 time_t类型
+    time_t t = time(NULL);
+
+    // 传给localtime 函数，返回的是一个指向结构体 tm 的指针
+    struct tm *sys_tm = localtime(&t);
+    // 由于 localtime返回的结构体 为 全局静态结构体， 所以之后的值会覆盖之前的
+    // 因此，在定义一个结构体，将之前的拷贝到这里
+    struct tm my_tm = *sys_tm;
+
+```
+
+### 	字符串接口
+
+之后是一些字符串操作的接口：strrchr, snprintf, strcpy , strncpy.
+
+注意strrchr示例中的post + 1操作
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002161509800.png" alt="image-20251002161509800" style="zoom: 25%;" /><img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002161641574.png" alt="image-20251002161641574" style="zoom: 25%;" />
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002161849674.png" alt="image-20251002161849674" style="zoom: 33%;" /><img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002161904408.png" alt="image-20251002161904408" style="zoom:25%;" />
+
+
+
+## wirte_log函数
+
+​	这个函数是进行同步日志的写入，或者在异步模式下将任务放入队列，由后台线程将任务写入日志。
+
+### 文件操作
+
+FILE * m_fp ：m_fp指向打开的日志文件
+
+### fopen
+
+m_fp = fopen(路径，打开模式)
+
+### fputs
+
+​	使用 fputs("内容"， m_fp); 是写入操作，但是数据这是先写入了内存缓冲区，不一定马上写入硬盘文件
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002000741226.png" alt="image-20251002000741226" style="zoom:50%;" />
+
+### ffulsh()
+
+​	fflush(m_fp)是强制将缓冲区的内容立刻写入文件或者终端。
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002000808230.png" alt="image-20251002000808230" style="zoom:50%;" />
+
+如果缓冲区内存在数据，可以直接使用fflush(),但是如果没有，就要先使用fputs()
+
+
+
+
+
+## flush_log_thread函数
+
+  // 异步日志写入 -- 为线程的访问提供一个接口  pthread_create
+
+  **static** void *flush_log_thread(void *args)
+
+  {
+
+​    log::get_instance()->async_write_log();
+
+  }
+
+这里使用flush_log_thread函数来间接访问异步写入函数的原因如下：
+
+​	**图中的函数类型**：返回值为指针，所需参数为通用指针类型，中间的是函数指针，其相当于一个函数名（都是指向同一个函数地址，比如数组名就是该数组的首地址
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002225825226.png" alt="image-20251002225825226" style="zoom:45%;" />
+
+
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002233213108.png" alt="image-20251002233213108" style="zoom:40%;" /><img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002233219640.png" alt="image-20251002233219640" style="zoom:45%;" />
+
+
+
+## 异步日志的写入好处
+
+
+
+![image-20251002230152523](C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251002230152523.png)
+
+
+
+
+
+## write_log函数中：先进行m_count++，在写入日志的原因：
+
+<img src="C:\Users\王者荣耀\AppData\Roaming\Typora\typora-user-images\image-20251004164047569.png" alt="image-20251004164047569" style="zoom:50%;" />
