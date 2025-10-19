@@ -1,6 +1,7 @@
 #include "my_http_conn.h"
 #include <mysql/mysql.h>
 #include <fstream>
+#include <chrono>
 
 // 定义http响应的一些状态信息
 const char *ok_200_title = "OK";
@@ -21,16 +22,16 @@ void http_conn::initmysql_result(connection_pool *pool)
 {
     MYSQL *mysql = NULL;
     // 从数据库连接池中取出一个数据库连接
-    connectionRAII(mysql, pool);
+    connectionRAII(&mysql, pool);
     // 查询用户表，选出用户名以及密码
-    if (mysql_query(mysql, "SELECT username, passwad FROM user"))
+    if (mysql_query(mysql, "SELECT username, passwd FROM user"))
     {
         LOG_ERROR("SELECT error:%s\n", mysql_error(mysql));
     }
-    // 将查询结果全部取出，放入内存结果对象中
+    // 将查询结果全部取出，放入内存结果对象中--->NULL?
     MYSQL_RES *result = mysql_store_result(mysql);
     // 获取查询结果中的字段数
-    int num_filelds = mysql_num_filelds(result);
+    int num_filelds = mysql_num_fields(result);
 
     // 返回所有字段结构的数组
     MYSQL_FIELD *fields = mysql_fetch_fields(result);
@@ -48,20 +49,20 @@ void http_conn::initmysql_result(connection_pool *pool)
 int setnonblocking(int fd)
 {
     // F_GETFL 表述取出当前fd的属性
-    int old_option = fctnl(fd, F_GETFL);
+    int old_option = fcntl(fd, F_GETFL);
     int new_option = old_option | O_NONBLOCK;
-    // F_SETEL 表示设置fd的属性
-    fctnl(fd, F_SETEL, new_option);
+    // F_SETFL 表示设置fd的属性
+    fcntl(fd, F_SETFL, new_option);
     return old_option;
 }
 
-void addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
+bool addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
 {
     epoll_event event;
     event.data.fd = fd;
     if (TRIGMode == 1)
     {
-        event.events = EPOLLIN | EPPOLLRDHUP | EPOLLET;
+        event.events = EPOLLIN | EPOLLRDHUP | EPOLLET;
     }
     else
     {
@@ -71,6 +72,7 @@ void addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
         event.events |= EPOLLONESHOT;
     epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
     setnonblocking(fd);
+    return true;
 }
 
 // 从内核事件表中删除描述符
@@ -107,7 +109,7 @@ void http_conn::close_conn(bool real_close)
 {
     if (real_close && (m_sockfd != -1))
     {
-        printf("close %d\n", m_sockfd);
+        printf("http_conn : close %d\n", m_sockfd);
         removefd(m_epollfd, m_sockfd);
         m_sockfd = -1;
         m_user_count--;
@@ -118,10 +120,13 @@ void http_conn::close_conn(bool real_close)
 void http_conn::init(int sockfd, const sockaddr_in &addr, char *root, int TRIGMode,
                      int close_log, string user, string passwd, string sqlname)
 {
-    m_sockfd = sockfd;
+    m_sockfd = sockfd; // 是否有问题
+    LOG_INFO("init sockfd = %d", sockfd);
     m_address = addr;
     m_TRIGMode = TRIGMode;
-    addfd(m_epollfd, m_sockfd, true, m_TRIGMode);
+    bool ret = addfd(m_epollfd, sockfd, true, m_TRIGMode);
+    if (ret)
+        LOG_INFO("addfd---success");
     m_user_count++; // 多线程中是否上锁
 
     doc_root = root;
@@ -157,7 +162,7 @@ void http_conn::init()
     improv = 0;
 
     memset(m_read_buf, '\0', READ_BUFFER_SIZE);
-    memset(m_write_but, '\0', WRITE_BUFFER_SIZE);
+    memset(m_write_buf, '\0', WRITE_BUFFER_SIZE);
     memset(m_real_file, '\0', FILENAME_LEN);
 }
 
@@ -178,7 +183,7 @@ void http_conn::init()
 http_conn::LINE_STATUS http_conn::parse_line()
 {
     char temp;
-    for (; m_checked_idx < m_read_idx; m_checked_idx++)
+    for (; m_checked_idx < m_read_idx; ++m_checked_idx) //++m_checked_idx???????????
     {
         temp = m_read_buf[m_checked_idx];
         if (temp == '\r') //  \r表示回车
@@ -191,7 +196,7 @@ http_conn::LINE_STATUS http_conn::parse_line()
                 m_read_buf[m_checked_idx++] = '\0';
                 // 全部设置完之后，m_checked_idx又会+1 ,指向下一行开头
                 m_read_buf[m_checked_idx++] = '\0';
-                return LINE_OK
+                return LINE_OK;
             }
             return LINE_BAD;
         }
@@ -215,18 +220,24 @@ bool http_conn::read_once()
 {
     if (m_read_idx >= READ_BUFFER_SIZE)
     {
-        return false
+        return false;
     }
     int bytes_read = 0;
     // LT模式
     if (m_TRIGMode == 0)
     {
+        auto t1 = std::chrono::steady_clock::now();
         bytes_read = recv(m_sockfd, m_read_buf + m_read_idx, READ_BUFFER_SIZE - m_read_idx, 0);
+        auto t2 = std::chrono::steady_clock::now();
+        LOG_INFO("read耗时 %ld ms, bytes=%ld, errno=%d",
+                 std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count(),
+                 bytes_read, errno);
         if (bytes_read <= 0)
         {
             return false;
         }
         m_read_idx += bytes_read;
+        return true; // 1018加入
     }
     // ET模式
     if (m_TRIGMode == 1)
@@ -257,7 +268,8 @@ bool http_conn::read_once()
 // 解析http报文的请求行,获得请求方法，url,http版本号
 http_conn::HTTP_CODE http_conn::parse_request_line(char *text)
 {
-    m_url = strpbrk(text, "\t"); // 检索str1(text)，当遇到str2(\t)中包含的字符时，将该字符位置的前的str1中的字符全部去掉
+    // LOG_INFO("fpy-parse_request_line");
+    m_url = strpbrk(text, " \t"); // 检索str1(text)，当遇到str2(\t)中包含的字符时，将该字符位置的前的str1中的字符全部去掉
     if (!m_url)
         return BAD_REQUEST;
     // 这里将指针指向的空格(\t)改为 字符串结束符号(\0),从而将text截为两部分
@@ -269,6 +281,7 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text)
     }
     else if (strcasecmp(method, "POST") == 0)
     {
+        // LOG_INFO("parse_request_line---m_method = POST");
         m_method = POST;
         cgi = 1;
     }
@@ -278,8 +291,8 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text)
     }
     // 经过前面的处理，m_url应该指向URL，但是为了防止URL前面存在空格，要进行这样的处理
     // 让m_url指向有效的URL字符
-    m_url += strspn(m_url, '\t');
-    m_version = strpbrk(m_url, '\t');
+    m_url += strspn(m_url, " \t");
+    m_version = strpbrk(m_url, " \t"); // 找到下一个空格
     if (!m_version)
     {
         return BAD_REQUEST;
@@ -287,11 +300,11 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text)
     // 将URL以及版本号之间的第一个空格变为结束符
     *m_version++ = '\0';
     // 同样，找出版本号前多余的空格，并移动指针，使其指向有效字符
-    m_version += strspn(m_version, '\t');
+    m_version += strspn(m_version, " \t");
     if (strcasecmp(m_version, "HTTP/1.1") != 0)
         return BAD_REQUEST;
     // 下面两个if语句是用来剥掉协议头
-    if (strncasecmp(m_url, "HTTP://", 7) == 0)
+    if (strncasecmp(m_url, "http://", 7) == 0)
     {
         m_url += 7;
         m_url = strchr(m_url, '/');
@@ -306,8 +319,8 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char *text)
     {
         return BAD_REQUEST;
     }
-    // 路径只剩 "/"时，默认给judge.htm这个页面
-    if (strlen(m_url))
+    // 路径只剩 "/"时，默认给judge.htm这个页面,即长度为1
+    if (strlen(m_url) == 1)
     {
         strcat(m_url, "judge.html");
     }
@@ -332,7 +345,8 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text)
     else if (strncasecmp(text, "Connection:", 11) == 0)
     {
         text += 11;
-        text += strspn(text, '\t');
+        // 空格也要跳过
+        text += strspn(text, " \t");
         if (strcasecmp(text, "keep-alive") == 0)
         {
             m_linger = true;
@@ -341,14 +355,14 @@ http_conn::HTTP_CODE http_conn::parse_headers(char *text)
     else if (strncasecmp(text, "Content-length:", 15) == 0)
     {
         text += 15;
-        text += strspn(text, "\t");
+        text += strspn(text, " \t");
         // 将字符串形式的数据转换为long
         m_content_length = atol(text);
     }
     else if (strncasecmp(text, "Host:", 5) == 0)
     {
         text += 5;
-        text += strspn(text, "\t");
+        text += strspn(text, " \t");
         m_host = text;
     }
     else
@@ -367,7 +381,7 @@ http_conn::HTTP_CODE http_conn::parse_content(char *text)
         m_string = text;
         return GET_REQUEST;
     }
-    return NO_REQUEST
+    return NO_REQUEST;
 }
 
 // 主状态机
@@ -376,15 +390,14 @@ http_conn::HTTP_CODE http_conn::process_read()
     LINE_STATUS line_status = LINE_OK;
     HTTP_CODE ret = NO_REQUEST;
     char *text = 0;
-    while (((line_status = parse_line()) == LINE_OK) ||
-           (m_check_state == CHECK_STATE_CONTENT && line_status == LINE_OK))
+    while ((m_check_state == CHECK_STATE_CONTENT && line_status == LINE_OK) || ((line_status = parse_line()) == LINE_OK))
     {
         text = get_line();            // 指向读缓冲区的首行
         m_start_line = m_checked_idx; // 每次从状态机parse_line()函数调用时，会使m_checked_idx指向下一行首行
         LOG_INFO("%s", text);
         switch (m_check_state)
         {
-        case CHECK_STATE_RESQUESTLINE:
+        case CHECK_STATE_REQUESTLINE:
         {
             ret = parse_request_line(text);
             if (ret == BAD_REQUEST)
@@ -430,15 +443,15 @@ http_conn::HTTP_CODE http_conn::do_request()
     {
         char flag = m_url[1];
         char *m_url_real = (char *)malloc(sizeof(char) * 200);
-        strcpy(m_url_real, '/');
+        strcpy(m_url_real, "/");
         strcat(m_url_real, m_url + 2);
         // 限制拷贝的长度
-        strncpy(m_real_file + len, m_url_real, FINENAM_LEN - len - 1);
+        strncpy(m_real_file + len, m_url_real, FILENAME_LEN - len - 1);
         free(m_url_real);
 
         // 将用户名和密码提取出来
         // user=123&passwd=123
-        char name[100], passwd[100];
+        char name[100], password[100];
         int i;
         for (i = 5; m_string[i] != '&'; ++i)
         {
@@ -449,9 +462,9 @@ http_conn::HTTP_CODE http_conn::do_request()
         int j = 0;
         for (i = i + 10; m_string[i] != '\0'; ++i, ++j)
         {
-            passwd[j] = m_string[i];
+            password[j] = m_string[i];
         }
-        passwd[j] = '\0';
+        password[j] = '\0';
         // 3 表示注册，先判断是否存在
         // 不存在则继续注册
         if (*(p + 1) == '3')
@@ -460,29 +473,31 @@ http_conn::HTTP_CODE http_conn::do_request()
             strcpy(sql_insert, "INSERT INTO user(username, passwd) VALUES(");
             strcat(sql_insert, "'");
             strcat(sql_insert, name);
-            strcat(sql_insert, "','");
-            strcat(sql_insert, "'");
-            strcat(sql_insert, passwd);
+            strcat(sql_insert, "', '");
+            strcat(sql_insert, password);
             strcat(sql_insert, "')");
 
             // 在map中没有找到对应的名字，说明未注册
-            lock.lcok();
+            // lock.lock();  1018 --12
             if (users.find(name) == users.end())
             {
+                lock.lock();
 
                 // 把sql_insert语句发送给MYSQL，让服务器执行，返回值为0表示成功
                 int res = mysql_query(mysql, sql_insert);
                 // 往map中插入数据
-                users.insert(pair<string, string>(name, passwd));
+                // users.insert(pair<string, string>(name, password));
                 lock.unlock();
-                free(sql_insert);
+                free(sql_insert); // 1018 --12
 
                 if (!res)
                 {
+                    users.insert(pair<string, string>(name, password));
                     strcpy(m_url, "/log.html");
                 }
                 else
                 {
+                    printf("mysql_query error: %s\n", mysql_error(mysql));
                     strcpy(m_url, "/registerError.html");
                 }
             }
@@ -495,7 +510,7 @@ http_conn::HTTP_CODE http_conn::do_request()
         else if (*(p + 1) == '2')
         {
             // 在map容器中可以找到名字，并且对应的密码也一样
-            if (users.find(name) != users.end() && users[name] == passwd)
+            if (users.find(name) != users.end() && users[name] == password)
             {
                 strcpy(m_url, "/welcome.html");
             }
@@ -508,8 +523,17 @@ http_conn::HTTP_CODE http_conn::do_request()
     if (*(p + 1) == '0')
     {
         char *m_url_real = (char *)malloc(sizeof(char) * 200);
+        strcpy(m_url_real, "/register.html");
+        strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+        free(m_url_real);
+    }
+    // 之前没写
+    else if (*(p + 1) == '1')
+    {
+        char *m_url_real = (char *)malloc(sizeof(char) * 200);
         strcpy(m_url_real, "/log.html");
         strncpy(m_real_file + len, m_url_real, strlen(m_url_real));
+
         free(m_url_real);
     }
     else if (*(p + 1) == '5')
@@ -541,7 +565,7 @@ http_conn::HTTP_CODE http_conn::do_request()
     if (stat(m_real_file, &m_file_stat) < 0)
         return NO_RESOURCE;
     // 判断文件时候可读，如果文件不可读，返回FORBIDDEN_REQUEST
-    if (!(m_file_stat.st_mode & = S_IROTH))
+    if (!(m_file_stat.st_mode &= S_IROTH))
     {
         return FORBIDDEN_REQUEST;
     }
@@ -583,7 +607,7 @@ bool http_conn::add_response(const char *format, ...)
     //  va_start 初始化可变参数列表，从 format 之后的参数开始读取。
     va_start(arg_list, format);
     // m_wirte_buf + m_write_idx 写入当前位置
-    int len = vsprintf(m_wirte_buf + m_write_idx, WRITE_BUFFER_SIZE - 1 - m_write_idx, format, arg_list);
+    int len = vsnprintf(m_write_buf + m_write_idx, WRITE_BUFFER_SIZE - 1 - m_write_idx, format, arg_list);
     if (len >= (WRITE_BUFFER_SIZE - 1 - m_write_idx))
     {
         // 如果超过，释放可变参数资源
@@ -608,7 +632,7 @@ bool http_conn::add_content_length(int content_len)
     return add_response(" Content-Length: %d\r\n", content_len);
 }
 // 响应头中的响应内容类型
-boot http_conn::add_content_type()
+bool http_conn::add_content_type()
 {
     return add_response("Content-Type:%s\r\n", "text/html");
 }
@@ -650,7 +674,7 @@ bool http_conn::process_write(HTTP_CODE ret)
     }
     case BAD_REQUEST:
     {
-        add_status_line(404, erro_404_title);
+        add_status_line(404, error_404_title);
         add_headers(strlen(error_404_form));
         if (!add_content(error_404_form))
             return false;
@@ -674,7 +698,7 @@ bool http_conn::process_write(HTTP_CODE ret)
             add_headers(m_file_stat.st_size);
             m_iv[0].iov_base = m_write_buf;    // iov_base 缓冲区起始地址
             m_iv[0].iov_len = m_write_idx;     // iov_len 缓冲区长度
-            m_iv[1].ion_base = m_file_address; // m_file_address 是通过 mmap 映射得到的文件在内存中的首地址
+            m_iv[1].iov_base = m_file_address; // m_file_address 是通过 mmap 映射得到的文件在内存中的首地址
             m_iv[1].iov_len = m_file_stat.st_size;
             m_iv_count = 2; // 缓冲区个数
             bytes_to_send = m_write_idx + m_file_stat.st_size;
@@ -692,7 +716,7 @@ bool http_conn::process_write(HTTP_CODE ret)
         return false;
     }
     m_iv[0].iov_base = m_write_buf;
-    m_iv[0].iv_len = m_write_idx;
+    m_iv[0].iov_len = m_write_idx;
     m_iv_count = 1;
     bytes_to_send = m_write_idx;
     return true;
@@ -719,7 +743,7 @@ bool http_conn::write()
         {
             // errno == EAGAIN：说明发送缓冲区满了，不能继续写
             // 重新注册写事件
-            if (error == EAGAIN)
+            if (errno == EAGAIN)
             {
                 // 重新启用epoll监听（因为使用了oneshot，所以监听一次，这个fd就会停止）
                 modfd(m_epollfd, m_sockfd, EPOLLOUT, m_TRIGMode);
@@ -740,7 +764,7 @@ bool http_conn::write()
         else
         {
             m_iv[0].iov_base = m_write_buf + bytes_have_send;
-            m_iv[0].iov_len = m.iv[0].iov_len - bytes_to_send;
+            m_iv[0].iov_len = m_iv[0].iov_len - bytes_have_send; // bytes_to_send  ->bytes_have_send
         }
         if (bytes_to_send <= 0)
         {
@@ -764,18 +788,28 @@ bool http_conn::write()
 void http_conn::process()
 {
     // 解析客户端请求
+    auto t_start = std::chrono::steady_clock::now();
+
     HTTP_CODE read_ret = process_read();
+
+    auto t_parse_process_read = std::chrono::steady_clock::now();
+    LOG_INFO("read_ret = %d", read_ret);
     if (read_ret == NO_REQUEST)
     {
         modfd(m_epollfd, m_sockfd, EPOLLIN, m_TRIGMode);
-        return true;
+        return;
     }
     // 生成HTTP响应数据
     bool write_ret = process_write(read_ret);
+
+    auto t_write = std::chrono::steady_clock::now();
     if (!write_ret)
     {
         close_conn();
     }
     // 如何HTTP响应数据生成成功，修改fd为可写事件
     modfd(m_epollfd, m_sockfd, EPOLLOUT, m_TRIGMode);
+    LOG_INFO("process_read=%ldms write=%ldms",
+             std::chrono::duration_cast<std::chrono::milliseconds>(t_parse_process_read - t_start).count(),
+             std::chrono::duration_cast<std::chrono::milliseconds>(t_write - t_parse_process_read).count());
 }

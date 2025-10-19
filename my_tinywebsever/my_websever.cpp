@@ -29,7 +29,7 @@ WebSever::~WebSever()
 }
 
 // 初始化
-void WebSever::init(int port, strign user, string passWord, string databaseName, int log_write,
+void WebSever::init(int port, string user, string passWord, string databaseName, int log_write,
                     int opt_linger, int trigmode, int sql_num, int thread_num, int close_log, int actor_model)
 {
     m_port = port;                 // 端口号
@@ -37,9 +37,9 @@ void WebSever::init(int port, strign user, string passWord, string databaseName,
     m_passWord = passWord;         // 数据库密码
     m_databaseName = databaseName; // 数据库名
     m_sql_num = sql_num;           // 数据库连接池的数量
-    m_thread_pool = thread_num;    // 线程池的数量
+    m_thread_num = thread_num;     // 线程池的数量
     m_log_write = log_write;       // 日志的写入方式
-    m_OPT_LINGER = opt_linger;     // 用于控制关闭连接时的延迟发送
+    m_POT_LINGER = opt_linger;     // 用于控制关闭连接时的延迟发送
     m_TRIGMode = trigmode;         // 触发模式 LT ET
     m_close_log = close_log;       // 控制日志关闭
     m_actormodel = actor_model;    // 并发模式选择： 0 Poractor  1 Reactor
@@ -50,25 +50,26 @@ void WebSever::trig_mode()
     // LT LT
     if (m_TRIGMode == 0)
     {
-        m_LISTENrigmode = 0;
+        LOG_INFO("m_TRIGMode == 0");
+        m_LISTENTrigmode = 0;
         m_CONNTrigmode = 0;
     }
     // LT + ET
     else if (m_TRIGMode == 1)
     {
-        m_LISTErigmode = 0;
+        m_LISTENTrigmode = 0;
         m_CONNTrigmode = 1;
     }
     // ET + LT
     else if (m_TRIGMode == 1)
     {
-        m_LISTErigmode = 1;
+        m_LISTENTrigmode = 1;
         m_CONNTrigmode = 0;
     }
     // ET + ET
     else if (m_TRIGMode == 2)
     {
-        m_LISTErigmode = 1;
+        m_LISTENTrigmode = 1;
         m_CONNTrigmode = 1;
     }
 }
@@ -97,7 +98,7 @@ void WebSever::sql_pool()
     m_connpool = connection_pool::GetInstance();
     m_connpool->init("localhost", m_user, m_passWord, m_databaseName, 3306, m_sql_num, m_close_log);
     // 初始化数据库读取表
-    users->initmysql_result(m_connPool);
+    users->initmysql_result(m_connpool);
 }
 
 void WebSever::thread_pool()
@@ -109,25 +110,26 @@ void WebSever::thread_pool()
 void WebSever::eventListen()
 {
     // 网络编程基础步骤
+    // LOG_INFO("eventListen");
     m_listenfd = socket(AF_INET, SOCK_STREAM, 0);
     assert(m_listenfd >= 0);
 
     // 优雅关闭连接
-    if (m_OPT_LINGER == 0)
+    if (m_POT_LINGER == 0)
     {
         struct linger tmp = {0, 1};
         setsockopt(m_listenfd, SOL_SOCKET, SO_LINGER, &tmp, sizeof(tmp));
     }
-    else if (m_OPT_LINGER == 1)
+    else if (m_POT_LINGER == 1)
     {
         struct linger tmp = {1, 1};
         setsockopt(m_listenfd, SOL_SOCKET, SO_LINGER, &tmp, sizeof(tmp));
     }
     int ret = 0;
     struct sockaddr_in address;
-    brzeo(&address, sizeof(address));
+    bzero(&address, sizeof(address));
     address.sin_family = AF_INET;
-    address_sin_addr.s_addr = htonl(INADDR_ANY);
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = htons(m_port);
 
     int flag = 1;
@@ -150,7 +152,7 @@ void WebSever::eventListen()
     // 保证所有的http_conn对象调用同一个epoll
     http_conn::m_epollfd = m_epollfd;
 
-    ret = sockapir(PF_UNIX, SOCK_STREAM, 0, m_pipefd);
+    ret = socketpair(PF_UNIX, SOCK_STREAM, 0, m_pipefd);
     assert(ret != -1);
     utils.setnonblocking(m_pipefd[1]);
     utils.addfd(m_epollfd, m_pipefd[0], false, 0);
@@ -162,15 +164,17 @@ void WebSever::eventListen()
 
     // 在指定的秒数后向进程发送 SIGALRM 信号
     alarm(TIMESLOT);
+    // 静态成员变量赋值
     Utils::u_pipefd = m_pipefd;
     Utils::u_epollfd = m_epollfd;
 }
 
-// 接收客户端连接后，进行一系列的操作
+// 接收客户端连接后，进行一系列的定时器操作
 void WebSever::timer(int connfd, struct sockaddr_in client_address)
 {
+    LOG_INFO("dealclientdata->timer");
     // 初始化http连接
-    users[connfd].init(connfd, client_address, m_root, m_CONNTrimode, m_close_log, m_user, m_passWord, m_databaseName);
+    users[connfd].init(connfd, client_address, m_root, m_CONNTrigmode, m_close_log, m_user, m_passWord, m_databaseName);
 
     // 初始化client_data
     // 创建定时器，设置回调函数和超时时间，绑定用户，将定时器添加到链表中
@@ -179,12 +183,13 @@ void WebSever::timer(int connfd, struct sockaddr_in client_address)
     util_timer *timer = new util_timer;
     timer->user_data = &users_timer[connfd];
     timer->cb_func = cb_func;
-    time_t cur timer(NULL);
-    timer->expire = cur + 3 * TIMERSLOT;
+    time_t cur = time(NULL);
+    timer->expire = cur + 3 * TIMESLOT;
     // 将定时器绑定到客户端中
     users_timer[connfd].timer = timer;
     // 添加到链表中
-    utils.m_timer_lst.add_timer(timer);
+    utils.my_timer_lst.add_timer(timer);
+    LOG_INFO("timer-->end");
 }
 
 // 若有数据传输，则将定时器往后延时3个单位
@@ -193,23 +198,24 @@ void WebSever::adjust_timer(util_timer *timer)
 {
     time_t cur = time(NULL);
     timer->expire = cur + 3 * TIMESLOT;
-    utils.m_timer_lst.adjust_timer(timer);
+    utils.my_timer_lst.adjust_timer(timer);
     LOG_INFO("%s", "adjust timer once");
 }
 
 void WebSever::deal_timer(util_timer *timer, int sockfd)
 {
-    timer->cb_func(&user_timer[sockfd]);
+    timer->cb_func(&users_timer[sockfd]);
     if (timer)
     {
-        utils.m_timer_lst.del_timer(timer);
+        utils.my_timer_lst.del_timer(timer);
     }
-    LOG_INFO("close fd %d", users_timer[sockfd].sockfd);
+    LOG_INFO("deal_timer close fd %d", users_timer[sockfd].sockfd);
 }
 
 // 处理客户端连接请求
 bool WebSever::dealclientdata()
 {
+    // LOG_INFO("dealclientdata");
     struct sockaddr_in client_address; // 用于获取客户端的IP地址，端口号
     // 获取结构体长度
     socklen_t client_addrlength = sizeof(client_address);
@@ -228,14 +234,16 @@ bool WebSever::dealclientdata()
             LOG_ERROR("%s", "Internal server busy");
             return false;
         }
+        // LOG_INFO("0 == m_LISTENTrigmode");
         timer(connfd, client_address);
     }
     else
     {
+        LOG_INFO("1 == m_LISTENTrigmode");
         // ET模式 要一直循环
         while (1)
         {
-            int connfd = accept(m_listenfd, (struct sockadde *)&client_address, &client_addrlength);
+            int connfd = accept(m_listenfd, (struct sockaddr *)&client_address, &client_addrlength);
             if (connfd < 0)
             {
                 LOG_ERROR("%s:error is: %d", "accept, error", errno);
@@ -247,7 +255,7 @@ bool WebSever::dealclientdata()
                 LOG_ERROR("%s", "Inter server busy");
                 break;
             }
-            timer(connfd, lient_address);
+            timer(connfd, client_address);
         }
         return false;
     }
@@ -263,18 +271,18 @@ bool WebSever::dealwithsignal(bool &timeout, bool &stop_sever)
     int ret = 0;
     int sig;
     char signals[1024];
-    ret = recv(m_pipelfd[0], signals, sizeof(signals), 0);
+    ret = recv(m_pipefd[0], signals, sizeof(signals), 0);
     if (ret == -1)
     {
         return false;
     }
     else if (ret == 0)
     {
-        return false
+        return false;
     }
     else
     {
-        for (int i = 0; i < ret; i++)
+        for (int i = 0; i < ret; ++i) // i++ -->++i
         {
             switch (signals[i])
             {
@@ -283,7 +291,7 @@ bool WebSever::dealwithsignal(bool &timeout, bool &stop_sever)
                 timeout = true;
                 break;
             }
-            case SIGTREM: // 终止进程信号
+            case SIGTERM: // 终止进程信号
             {
                 stop_sever = true;
                 break;
@@ -313,6 +321,7 @@ void WebSever::dealwithread(int sockfd)
                 // timer_flag标记连接是否超时
                 if (1 == users[sockfd].timer_flag)
                 {
+                    LOG_INFO("dealwithread---reactor---deal_timer");
                     deal_timer(timer, sockfd);
 
                     users[sockfd].timer_flag = 0;
@@ -329,7 +338,7 @@ void WebSever::dealwithread(int sockfd)
         {
             LOG_INFO("deal with the client(%s)", inet_ntoa(users[sockfd].get_address()->sin_addr));
             // 检测到读事件，将该事件放入请求队列
-            m_pool->append_P(&users[sockfd]);
+            m_pool->append_p(&users[sockfd]);
             if (timer)
             {
                 adjust_timer(timer);
@@ -337,6 +346,7 @@ void WebSever::dealwithread(int sockfd)
         }
         else
         {
+            // LOG_INFO("1018---dealwithread---precator---deal_timer");
             deal_timer(timer, sockfd);
         }
     }
@@ -360,7 +370,8 @@ void WebSever::dealwithwrite(int sockfd)
             {
                 if (users[sockfd].timer_flag == 1)
                 {
-                    deal_timer(tiemr, sockfd);
+                    LOG_INFO("dealwithwrite---reactor---deal_timer");
+                    deal_timer(timer, sockfd);
                     users[sockfd].timer_flag = 0;
                 }
                 users[sockfd].improv = 0;
@@ -380,6 +391,7 @@ void WebSever::dealwithwrite(int sockfd)
         }
         else
         {
+            // LOG_INFO("dealwithwrite---precator---deal_timer");
             deal_timer(timer, sockfd);
         }
     }
@@ -388,6 +400,7 @@ void WebSever::dealwithwrite(int sockfd)
 // 服务器的主循环
 void WebSever::eventLoop()
 {
+    // LOG_INFO("eventLoop");
     bool timeout = false;    // 是否有定时器超时信号
     bool stop_sever = false; // 是否关闭服务器
 
@@ -422,6 +435,7 @@ void WebSever::eventLoop()
             // 处理信号
             else if ((sockfd == m_pipefd[0]) && (events[i].events & EPOLLIN))
             {
+                LOG_INFO("sockfd == m_pipefd[0]");
                 // 调用信号处理函数，是超时还是关闭服务器
                 bool flag = dealwithsignal(timeout, stop_sever);
                 if (flag == false)
@@ -439,10 +453,11 @@ void WebSever::eventLoop()
                 dealwithwrite(sockfd);
             }
         }
+        // 超时信号
         if (timeout)
         {
             utils.timer_handler();
-            LOG_INFO("%s", "time tick");
+            LOG_INFO("%s", "eventLoop---time tick");
             timeout = false;
         }
     }

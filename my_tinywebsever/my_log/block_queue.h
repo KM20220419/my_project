@@ -2,11 +2,11 @@
 #define MY_BLOCK_QUEUE_H
 
 #include <iostream>
-#include <stdlib.h>
 #include <sys/time.h>
+#include <stdlib.h>
 #include <pthread.h>
 
-#include "../my_lock/my_lock.h"
+#include "../my_lock/my_locker.h"
 
 // 使用模板->不确定队列中的类型
 
@@ -52,10 +52,10 @@ public:
         if (m_size >= m_max_size)
         {
             m_mutex.unlock();
-            return true
+            return true;
         }
         m_mutex.unlock();
-        return false
+        return false;
     }
     // 判断队列是否为空
     bool Isempty()
@@ -64,10 +64,10 @@ public:
         if (m_size == 0)
         {
             m_mutex.unlock();
-            return true
+            return true;
         }
         m_mutex.unlock();
-        return false
+        return false;
     }
 
     // 返回队首元素---用引用的方法
@@ -137,7 +137,7 @@ public:
         // 通知所有线程，有数据来了
         m_cond.signal_all();
         m_mutex.unlock();
-        return true
+        return true;
     }
 
     bool pop(T &value)
@@ -149,13 +149,13 @@ public:
             if (!m_cond.cond_wait(m_mutex.getptr())) // 在这里阻塞
             {
                 m_mutex.unlock();
-                return false
+                return false;
             }
         }
         m_front = (m_front + 1) % m_max_size;
         value = m_array[m_front];
         m_mutex.unlock();
-        return true
+        return true;
     }
 
     // 超时处理
@@ -183,7 +183,7 @@ public:
         }
         m_front = (m_front + 1) % m_max_size;
         value = m_array[m_front];
-        m_szie--;
+        m_size--;
         m_mutex.unlock();
         return true;
     }

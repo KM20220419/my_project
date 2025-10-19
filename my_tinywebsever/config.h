@@ -7,7 +7,8 @@ class Config
 {
 public:
     Config();
-    ~Config();
+    // 使用默认析构函数
+    ~Config() {}
 
     void parse_arg(int argc, char *argv[]);
     // 端口号
@@ -39,6 +40,6 @@ public:
 
     // 并发模型选择
     int actor_model;
-}
+};
 
 #endif

@@ -15,7 +15,7 @@ date: 2025/0930
 // 用于底层文件的写入
 #include <stdio.h>
 // 引入互斥锁
-#include "../my_lock/my_lock.h"
+#include "../my_lock/my_locker.h"
 #include "block_queue.h"
 
 using namespace std;
@@ -82,26 +82,26 @@ private:
 #define LOG_DEBUG(format, ...)                                    \
     if (0 == m_close_log)                                         \
     {                                                             \
-        Log::get_instance()->write_log(0, format, ##__VA_ARGS__); \
-        Log::get_instance()->flush();                             \
+        log::get_instance()->write_log(0, format, ##__VA_ARGS__); \
+        log::get_instance()->flush();                             \
     }
 #define LOG_INFO(format, ...)                                     \
     if (0 == m_close_log)                                         \
     {                                                             \
-        Log::get_instance()->write_log(1, format, ##__VA_ARGS__); \
-        Log::get_instance()->flush();                             \
+        log::get_instance()->write_log(1, format, ##__VA_ARGS__); \
+        log::get_instance()->flush();                             \
     }
 #define LOG_WARN(format, ...)                                     \
     if (0 == m_close_log)                                         \
     {                                                             \
-        Log::get_instance()->write_log(2, format, ##__VA_ARGS__); \
-        Log::get_instance()->flush();                             \
+        log::get_instance()->write_log(2, format, ##__VA_ARGS__); \
+        log::get_instance()->flush();                             \
     }
 #define LOG_ERROR(format, ...)                                    \
     if (0 == m_close_log)                                         \
     {                                                             \
-        Log::get_instance()->write_log(3, format, ##__VA_ARGS__); \
-        Log::get_instance()->flush();                             \
+        log::get_instance()->write_log(3, format, ##__VA_ARGS__); \
+        log::get_instance()->flush();                             \
     }
 
 #endif

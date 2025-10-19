@@ -22,14 +22,15 @@ connection_pool::~connection_pool()
     DestoryConn();
 }
 
-static connection_pool *connection_pool::GetInstance()
+// 函数声明时加static，在定义的时候就不用加static了
+connection_pool *connection_pool::GetInstance()
 {
 
     static connection_pool pool;
     return &pool;
 }
 
-void connection_pool::init(strign url, string User, string Password, string DBName, int port, int MaxConn, int close_log)
+void connection_pool::init(string url, string User, string Password, string DBName, int port, int MaxConn, int close_log)
 {
     m_url = url;
     m_port = port;
@@ -48,7 +49,7 @@ void connection_pool::init(strign url, string User, string Password, string DBNa
             LOG_ERROR("mysql ERROR");
             exit(1);
         }
-        conn = mysql_real_connecet(con, url.c_str(), User.c_str(), Password.c_str(), DBName.c_str(), Port, NULL, 0);
+        conn = mysql_real_connect(conn, url.c_str(), User.c_str(), Password.c_str(), DBName.c_str(), port, NULL, 0);
         if (conn == NULL)
         {
             LOG_ERROR("MYSQL ERROR");
@@ -68,12 +69,12 @@ MYSQL *connection_pool::GetConnection()
         return NULL;
     resever.wait(); // 相当于消费者，如果现在没有，就阻塞
 
-    locker.lock();
+    m_lock.lock();
     conn = connList.front(); // 这是取出元素
     connList.pop_front();    // list容器中的pop_front只是删除元素，没有取出的效果（没有返回值）
     m_CurConn++;
     FreeConn--;
-    locker.unlock();
+    m_lock.unlock();
     return conn;
 }
 
@@ -83,31 +84,31 @@ bool connection_pool::ReleaseConnection(MYSQL *conn)
     {
         return false;
     }
-    locker.lock();
+    m_lock.lock();
     connList.push_back(conn);
     m_CurConn--;
     FreeConn++;
-    locker.unlock();
+    m_lock.unlock();
     resever.post();
-    retrn true;
+    return true;
 }
 
 void connection_pool::DestoryConn()
 {
-    locker.lock();
+    m_lock.lock();
     if (connList.size() > 0)
     {
         list<MYSQL *>::iterator it; // 迭代器，相当于指针
         for (it = connList.begin(); it != connList.end(); it++)
         {
             MYSQL *con = *it; // 解引用，取出容器中的元素
-            my_close(con);    // 关闭连接
+            mysql_close(con); // 关闭连接
         }
         m_CurConn = 0;
         FreeConn = 0;
         connList.clear(); // 清除容器中的所有元素
     }
-    locker.unlock();
+    m_lock.unlock();
 }
 
 // 当前空闲的连接数

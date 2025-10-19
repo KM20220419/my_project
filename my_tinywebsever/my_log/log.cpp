@@ -25,7 +25,7 @@ log::~log()
     }
 }
 // 初始化
-bool log::init(const char *file_name, int close_log, int log_buf_size = 8192, int split_lines = 5000000, int max_queue_size = 0)
+bool log::init(const char *file_name, int close_log, int log_buf_size, int split_lines, int max_queue_size)
 {
     if (max_queue_size > 0)
     {

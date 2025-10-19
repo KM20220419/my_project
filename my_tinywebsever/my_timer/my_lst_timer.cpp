@@ -1,5 +1,5 @@
 #include "my_lst_timer.h"
-#include "../http/http_conn.h"
+#include "../my_http/my_http_conn.h"
 
 sort_timer_lst::sort_timer_lst()
 {
@@ -23,13 +23,13 @@ void sort_timer_lst::add_timer(util_timer *timer)
     // timer为空指针
     if (timer == NULL)
     {
-        return
+        return;
     }
     // 链表为空
     if (head == NULL)
     {
         head = tail = timer;
-        return
+        return;
     }
     // 如果传入的定时器的过期时间最短，将其放入链表的队头
     if (timer->expire < head->expire)
@@ -37,7 +37,7 @@ void sort_timer_lst::add_timer(util_timer *timer)
         timer->next = head;
         head->prev = timer;
         head = timer;
-        return
+        return;
     }
     // 否则，调用函数重载，放入链表的中部或者尾部
     add_timer(timer, head);
@@ -47,7 +47,7 @@ void sort_timer_lst::add_timer(util_timer *timer)
 void sort_timer_lst::add_timer(util_timer *timer, util_timer *lst_head)
 {
     util_timer *h = lst_head;
-    until_timer *tmp = h->next;
+    util_timer *tmp = h->next;
     while (tmp)
     {
         if (timer->expire < tmp->expire)
@@ -56,7 +56,7 @@ void sort_timer_lst::add_timer(util_timer *timer, util_timer *lst_head)
             tmp->prev = timer;
             timer->prev = h;
             timer->next = tmp;
-            return
+            return;
         }
         h = tmp;
         tmp = h->next;
@@ -65,20 +65,20 @@ void sort_timer_lst::add_timer(util_timer *timer, util_timer *lst_head)
     h->next = timer;
     timer->prev = h;
     tail = timer;
-    return
+    return;
 }
 
 void sort_timer_lst::adjust_timer(util_timer *timer)
 {
     if (!timer)
     {
-        return
+        return;
     }
     util_timer *tmp = timer->next;
     // 修改了过期时间，但是还是比后面的小---不变
     if (!tmp || timer->expire < tmp->expire)
     {
-        return
+        return;
     }
 
     if (timer == head) // 修改的是头部的timer
@@ -95,7 +95,7 @@ void sort_timer_lst::adjust_timer(util_timer *timer)
         timer->prev = NULL;
         timer->next = NULL;
         add_timer(timer, timer->next);
-        return
+        return;
     }
 }
 
@@ -112,7 +112,7 @@ void sort_timer_lst::del_timer(util_timer *timer)
         // 可以理解为：如果先将head置为空，就无法找到timer这个结构体所在的地址
         delete timer;
         head = tail = NULL;
-        return
+        return;
     }
     if (timer == head)
     {
@@ -120,26 +120,26 @@ void sort_timer_lst::del_timer(util_timer *timer)
         head->prev = NULL;
         delete timer;
         timer->next = NULL;
-        return
+        return;
     }
     if (timer == tail)
     {
         tail = tail->prev;
         tail->next = NULL;
         delete timer;
-        return
+        return;
     }
     timer->prev->next = timer->next;
     timer->next->prev = timer->prev;
     delete timer;
-    return
+    return;
 }
 
 void sort_timer_lst::tick()
 {
     if (!head)
     {
-        return
+        return;
     }
     time_t cur = time(NULL);
     util_timer *tmp = head;
@@ -173,7 +173,7 @@ int Utils::setnonblocking(int fd)
 {
     int old_option = fcntl(fd, F_GETFL);
     int new_option = old_option | O_NONBLOCK;
-    fcntl(fd, F_SFTFL, new_option);
+    fcntl(fd, F_SETFL, new_option);
     return old_option;
 }
 
@@ -181,7 +181,7 @@ int Utils::setnonblocking(int fd)
 // 把客户端连接（fd）添加到 epoll 监听列表中，并配置其触发行为
 void Utils::addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
 {
-    eppll_event event;
+    epoll_event event;
 
     event.data.fd = fd;
     // 设置边缘触发模式
@@ -191,13 +191,13 @@ void Utils::addfd(int epollfd, int fd, bool one_shot, int TRIGMode)
     }
     else
     {
-        event.events = EPOLLIN | EPOLLRDHUP
+        event.events = EPOLLIN | EPOLLRDHUP;
     }
     // 一次性触发
     if (one_shot)
         event.events |= EPOLLONESHOT;
     epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &event);
-    // ET模式下，要保证socket为非阻塞模式
+    // 保证socket为非阻塞模式
     setnonblocking(fd);
 }
 
@@ -217,8 +217,9 @@ void Utils::sig_handler(int sig)
 void Utils::addsig(int sig, void(handler)(int), bool restart)
 {
     // sig 为要绑定的信号（例如 SIGALRM, SIGTERM, SIGINT 等）
-    struct sigcation sa;
-    memset(&sa, "\0", sizeof(sa));
+    struct sigaction sa;
+    // 这里使用0  或者 '\0'(会被隐式提升为 int 型)
+    memset(&sa, '\0', sizeof(sa));
     sa.sa_handler = handler; // 为信号绑定信号处理函数 如sig_handler信号处理函数
     if (restart)
         sa.sa_flags |= SA_RESTART; // SA_RESTART 表示系统调用被信号打断后自动重启；
@@ -247,7 +248,7 @@ class Utils; // 前向声明
 // 回调函数-->关闭超时的客户端
 void cb_func(client_data *user_data)
 {
-    epoll_ctl(Utils::u_epollfd, EPOLL_CTL_DEL, use_data->sockfd, 0);
+    epoll_ctl(Utils::u_epollfd, EPOLL_CTL_DEL, user_data->sockfd, 0);
     assert(user_data);
     close(user_data->sockfd);
     http_conn::m_user_count--;

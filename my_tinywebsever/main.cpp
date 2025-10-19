@@ -4,7 +4,7 @@ int main(int argc, char *argv[])
 {
     // 需要修改的数据库信息，登录名，密码，库名
     string user = "root";
-    string passwd = "root";
+    string passwd = "MySQL@2025";
     string databasename = "fpydb";
 
     // 命令行解析
@@ -12,7 +12,7 @@ int main(int argc, char *argv[])
     config.parse_arg(argc, argv);
     WebSever server;
     // 初始化
-    server.init(config.PORT, user, passwd, databasename, config.LOGWrite,
+    server.init(config.port, user, passwd, databasename, config.LOGWrite,
                 config.OPT_LINGER, config.TRIGMode, config.sql_num, config.thread_num,
                 config.close_log, config.actor_model);
     // 日志

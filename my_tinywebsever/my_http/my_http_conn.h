@@ -11,6 +11,7 @@
 #include <assert.h>
 #include <sys/stat.h>
 #include <string.h>
+#include <strings.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,7 +22,7 @@
 #include <sys/uio.h>
 #include <map>
 
-#include "../my_lock/my_lock.h"
+#include "../my_lock/my_locker.h"
 #include "../my_CGImysql/my_sql_connection_pool.h"
 #include "../my_log/log.h"
 #include "../my_timer/my_lst_timer.h"
@@ -32,7 +33,7 @@ public:
     // 文件名长度
     static const int FILENAME_LEN = 200;
     // 读缓冲区大小
-    static const int READ_BUFFER_SIZE = 2048;
+    static const int READ_BUFFER_SIZE = 2048; // 2048->4096
     // 写缓冲区大小
     static const int WRITE_BUFFER_SIZE = 1024;
 
@@ -53,7 +54,7 @@ public:
     enum CHECK_STATE
     {
         // 解析从请求行开始，所以默认为0
-        CHEAK_STATE_REQUESTLINE = 0,
+        CHECK_STATE_REQUESTLINE = 0,
         CHECK_STATE_HEADER,
         CHECK_STATE_CONTENT
     };
@@ -78,8 +79,9 @@ public:
     };
 
 public:
-    htttp_conn();
-    ~http_conn();
+    // 加入{}，使用默认的构造以及析构；否则要在.cpp中写出构造以及析构函数
+    http_conn() {}
+    ~http_conn() {}
 
 public:
     // 初始化socket，并且函数内部调用私有方法init
@@ -103,13 +105,13 @@ private:
     // 主状态机解析整个请求
     HTTP_CODE process_read();
     // 根据解析结果生成响应
-    bool process_write(HTTP_CONDE ret);
+    bool process_write(HTTP_CODE ret);
     // 解析请求行
     HTTP_CODE parse_request_line(char *text);
     // 解析请求头
     HTTP_CODE parse_headers(char *text);
     // 解析请求主体
-    HTTP_CODE parse_content(chaar *text);
+    HTTP_CODE parse_content(char *text);
     HTTP_CODE do_request();
     // 返回当前正在解析的http当前行的地址
     char *get_line() { return m_read_buf + m_start_line; };
@@ -162,7 +164,7 @@ private:
     bool m_linger;                  // 是否保持连接
     char *m_file_address;           // 文件映射到内存的地址
     struct stat m_file_stat;        // 文件状态信息
-    struct iovec m_in[2];           // 用于 writev 分散写的两个缓冲区（头+文件）
+    struct iovec m_iv[2];           // 用于 writev 分散写的两个缓冲区（头+文件）
     int m_iv_count;
     int cgi;             // 是否启用POST
     char *m_string;      // 存储请求头数据
@@ -177,6 +179,6 @@ private:
     char sql_user[100];
     char sql_passwd[100];
     char sql_name[100];
-}
+};
 
 #endif

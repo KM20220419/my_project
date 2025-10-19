@@ -4,8 +4,8 @@
 #include <list>
 #include <cstdio>
 #include <exception>
-#include <pthread>
-#include "../my_lock/my_lock.h"
+#include <pthread.h>
+#include "../my_lock/my_locker.h"
 #include "../my_CGImysql/my_sql_connection_pool.h"
 
 template <class T>
@@ -27,14 +27,14 @@ private:
     int m_thread_numbers; // 线程池中的线程数
     int m_max_requests;   // 线程池中允许的最大请求数
     pthread_t *pthread;   // 存放线程的数组
-    locker m_lock;
+    locker m_locker;
     sem m_requeuestat; // 信号量，确定有无任务
     connection_pool *m_connpool;
     int m_actor_model;         // 用于模型切换
-    std::list<T *> m_workqueue // 用于存放任务的请求队列
+    std::list<T *> m_workqueue; // 用于存放任务的请求队列
 };
 template <class T>
-threadpool<T>::threadpool(int actor_model, connection_pool *m_connpool, int m_thread_numbers = 8, int m_max_requests = 10000) : m_actor_model(actor_model), m_connpool(m_connpool), m_thread_numbers(m_thread_numbers), m_max_requests(m_max_requests), pthreads(NULL)
+threadpool<T>::threadpool(int actor_model, connection_pool *connpool, int thread_numbers, int max_requests) : m_actor_model(actor_model), m_connpool(connpool), m_thread_numbers(thread_numbers), m_max_requests(max_requests), pthread(NULL)
 {
     if (m_thread_numbers == 0 || m_max_requests == 0)
     {
@@ -73,36 +73,36 @@ template <class T>
 // 用于reactor模式，其中state表示读或者写
 bool threadpool<T>::append(T *request, int state)
 {
-    m_lock.lock();
+    m_locker.lock();
     if (m_workqueue.size() >= m_max_requests)
     {
-        m_lock.unlock();
+        m_locker.unlock();
         return false;
     }
     request->m_state = state;
     m_workqueue.push_back(request);
-    m_lock.unlock();
+    m_locker.unlock();
     m_requeuestat.post();
-    return true
+    return true;
 }
 // proactor
 template <class T>
 bool threadpool<T>::append_p(T *request)
 {
-    m_lock.lock();
+    m_locker.lock();
     if (m_workqueue.size() >= m_max_requests)
     {
-        m_lock.unlock();
-        return false
+        m_locker.unlock();
+        return false;
     }
     m_workqueue.push_back(request);
-    m_lock.unlock();
+    m_locker.unlock();
     m_requeuestat.post();
-    return true
+    return true;
 }
 
 template <class T>
-static void *threadpool<T>::worker(void *arg)
+void *threadpool<T>::worker(void *arg)
 {
     threadpool *pool = (threadpool *)arg;
     pool->run();
@@ -119,14 +119,14 @@ void threadpool<T>::run()
         if (m_workqueue.empty())
         {
             m_locker.unlock();
-            continue
+            continue;
         }
         T *request = m_workqueue.front();
         m_workqueue.pop_front();
         m_locker.unlock();
         if (!request)
         { // 防止取出的为空指针
-            continue
+            continue;
         };
         if (m_actor_model == 1) // m_actor_model为1表示Reactor
         {
@@ -164,4 +164,5 @@ void threadpool<T>::run()
             request->process();
         }
     }
+}
 #endif

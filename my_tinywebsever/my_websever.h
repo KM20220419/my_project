@@ -26,7 +26,7 @@ class WebSever
 public:
     WebSever();
     ~WebSever();
-    void init(int port, string user, string passWord, strign databaseName,
+    void init(int port, string user, string passWord, string databaseName,
               int log_write, int opt_linger, int trigmode, int sql_num,
               int thread_num, int close_log, int actor_model);
     void thread_pool();                                        // 创建线程池
@@ -39,7 +39,7 @@ public:
     void adjust_timer(util_timer *timer);                      // 当连接有活动时，更新时间。
     void deal_timer(util_timer *timer, int sockfd);            // 处理超时事件（关闭连接、释放资源）
     bool dealclientdata();                                     // 处理新客户连接
-    bool dealwithsignal(bool &timerout, int sockfd);           // 处理信号（SIGALRM等）
+    bool dealwithsignal(bool &timerout, bool &stop_server);    // 处理信号（SIGALRM等）
     void dealwithread(int sockfd);                             // 处理读事件
     void dealwithwrite(int sockfd);                            // 处理写事件
 public:
@@ -76,6 +76,6 @@ public:
     // 定时器相关
     client_data *users_timer;
     Utils utils;
-}
-
+};
+// 1111111111111111
 #endif
